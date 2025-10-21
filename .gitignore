@@ -28,6 +28,9 @@ keys/
 # Personal vs code configs
 .vscode
 
+# Videos
+videos
+
 *.sublime-project
 *.sublime-workspace
 

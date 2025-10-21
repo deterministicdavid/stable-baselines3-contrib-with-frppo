@@ -1,13 +1,44 @@
 import multiprocessing
+import os
 import gymnasium as gym
 
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import CheckpointCallback
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecFrameStack, VecMonitor
+from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack, VecMonitor
+
 
 import pynvml
 import torch
 import random
+
+class OverwriteCheckpointCallback(BaseCallback):
+    """
+    Callback for saving a model periodically, overwriting the same file.
+
+    :param save_freq: The frequency (in total timesteps) at which to save the model.
+    :param save_path: Path to the folder where the model will be saved.
+    :param name_prefix: The name of the file to save the model to.
+    """
+    def __init__(self, save_freq: int, save_path: str, name_prefix: str = "latest_model", verbose: int = 0):
+        super().__init__(verbose)
+        self.save_freq = save_freq
+        self.save_path = save_path
+        # The full path for the save file, e.g., ./logs/latest_model.zip
+        self.save_file = os.path.join(save_path, f"{name_prefix}.zip")
+
+    def _init_callback(self) -> None:
+        # Create folder if needed
+        if self.save_path is not None:
+            os.makedirs(self.save_path, exist_ok=True)
+
+    def _on_step(self) -> bool:
+        # self.num_timesteps is the total number of steps taken in the environment
+        if self.num_timesteps > 0 and self.num_timesteps % self.save_freq == 0:
+            self.model.save(self.save_file)
+            if self.verbose > 0:
+                print(f"Saving latest model to {self.save_file}")
+        return True
+
 
 def select_free_gpu_or_fallback():
     """
@@ -44,35 +75,31 @@ def select_free_gpu_or_fallback():
 
 
 # --- Helper function to create environments ---
-def make_env(seed: int):
+def make_env(env_name: str, seed: int):
     def _init():
-        env = gym.make("CarRacing-v3", render_mode="rgb_array")
+        env = gym.make(env_name, render_mode="rgb_array")
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env.reset(seed=seed)
         return env
     return _init
 
-if __name__ == '__main__':
-    # to fix debugging on MacOS
-    multiprocessing.set_start_method("spawn")
-
+def train(env_name: str, log_dir: str, name_prefix: str, n_stack: int):
     selected_device = select_free_gpu_or_fallback()
 
     # --- Create multiple async environments ---
     num_envs = 10  # you can adjust this (4–12 works well depending on your CPU)
-    env_fns = [make_env(seed=i) for i in range(num_envs)]
+    env_fns = [make_env(env_name=env_name, seed=i) for i in range(num_envs)]
     env = SubprocVecEnv(env_fns)
 
     # --- Add vectorized wrappers ---
     env = VecMonitor(env)               # tracks episode rewards/lengths
-    env = VecFrameStack(env, n_stack=4) # stacks 4 frames per env
+    env = VecFrameStack(env, n_stack=n_stack) # stacks 4 frames per env
 
     # --- Setup what we save --- 
-    log_dir="./logs/"
-    checkpoint_callback = CheckpointCallback(
-          save_freq=5_000,
+    checkpoint_callback = OverwriteCheckpointCallback(
+          save_freq=10000,  # This is now based on total timesteps
           save_path=log_dir,
-          name_prefix="ppo_carracing_model"
+          name_prefix=name_prefix
         )
 
     # --- Create and train the model ---
@@ -86,7 +113,64 @@ if __name__ == '__main__':
         device=selected_device
     )
 
-    model.learn(total_timesteps=2_000_000, callback=checkpoint_callback)
-    model.save("ppo_carracing_async_stack")
+    model.learn(total_timesteps=20_000, callback=checkpoint_callback)
+    save_file = os.path.join(log_dir, name_prefix)
+    model.save(save_file)
 
     env.close()
+
+def vizualize(env_name: str, model_path: str, n_stack: int):
+    print("Starting visualization...")
+    
+    video_folder = "videos/"
+    os.makedirs(video_folder, exist_ok=True)
+
+    # Create a single environment for visualization
+    # The render_mode must be "rgb_array" for the RecordVideo wrapper
+    env = gym.make(env_name, render_mode="rgb_array")
+    # Wrap the environment to record a video
+    env = gym.wrappers.RecordVideo(env, video_folder=video_folder, episode_trigger=lambda e: e == 0)
+    
+    # Wrap for SB3 and FrameStack (must match training setup)
+    vec_env = DummyVecEnv([lambda: env])
+    vec_env = VecFrameStack(vec_env, n_stack=n_stack)
+
+    # Load the trained model
+    if not os.path.exists(model_path):
+        print(f"Model not found at {model_path}. Please run training first.")
+        return
+        
+    model = PPO.load(model_path, env=vec_env)
+
+    # Run one episode
+    obs = vec_env.reset()
+    done = False
+    rewsum = 0
+    step = 0
+    while not done:
+        step += 1
+        # Use deterministic actions for evaluation
+        action, _ = model.predict(obs, deterministic=True)
+        obs, rew, done, _ = vec_env.step(action)
+        done = done[0] # we only have one envirnoment
+        rewsum += rew[0]
+        if (step+1) % 100 == 0:
+            print(f"Step: {step+1}, reward so far: {rewsum:.2f}")
+
+    # The video is saved automatically when the environment is closed
+    vec_env.close()
+    print(f"Visualization complete. Video saved in '{video_folder}' folder.")
+
+if __name__ == '__main__':
+    # to fix debugging on MacOS
+    multiprocessing.set_start_method("spawn")
+    n_stack = 4
+    env_name = "CarRacing-v3"
+    log_dir="./logs/"
+    name_prefix = "ppo_carracing_latest"
+    
+    train(env_name=env_name, log_dir=log_dir, name_prefix=name_prefix, n_stack=n_stack)
+    model_path = os.path.join(log_dir, f"{name_prefix}.zip")
+    vizualize(env_name=env_name, model_path=model_path, n_stack=n_stack)
+
+    
