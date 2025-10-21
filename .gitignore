@@ -25,6 +25,8 @@ keys/
 /env
 /venv
 
+# Personal vs code configs
+.vscode
 
 *.sublime-project
 *.sublime-workspace
@@ -45,5 +47,6 @@ src
 .cache
 *.lprof
 *.prof
+*.zip
 
 MUJOCO_LOG.TXT

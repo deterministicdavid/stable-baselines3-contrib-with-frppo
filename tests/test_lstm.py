@@ -241,7 +241,7 @@ def test_ppo_lstm_performance():
         ),
     )
 
-    model.learn(total_timesteps=50_000, callback=eval_callback)
+    model.learn(total_timesteps=100_000, callback=eval_callback)
     # Maximum episode reward is 500.
     # In CartPole-v1, a non-recurrent policy can easily get >= 450.
     # In CartPoleNoVelEnv, a non-recurrent policy doesn't get more than ~50.

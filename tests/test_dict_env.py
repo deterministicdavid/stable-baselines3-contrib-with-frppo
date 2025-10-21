@@ -9,7 +9,7 @@ from stable_baselines3.common.envs import SimpleMultiObsEnv
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack, VecNormalize
 
-from sb3_contrib import QRDQN, TQC, TRPO
+from sb3_contrib import QRDQN, TQC, TRPO, FRPPO
 
 
 class DummyDictEnv(gym.Env):
@@ -89,7 +89,7 @@ def test_env(use_discrete_actions, channel_last, nested_dict_obs, vec_only):
         check_env(DummyDictEnv(use_discrete_actions, channel_last, nested_dict_obs, vec_only))
 
 
-@pytest.mark.parametrize("model_class", [QRDQN, TQC, TRPO])
+@pytest.mark.parametrize("model_class", [QRDQN, TQC, TRPO, FRPPO])
 def test_consistency(model_class):
     """
     Make sure that dict obs with vector only vs using flatten obs is equivalent.
@@ -104,7 +104,7 @@ def test_consistency(model_class):
     kwargs = {}
     n_steps = 256
 
-    if model_class in {TRPO}:
+    if model_class in {TRPO, FRPPO}:
         kwargs = dict(
             n_steps=128,
         )
@@ -134,7 +134,7 @@ def test_consistency(model_class):
     assert np.allclose(action_1, action_2)
 
 
-@pytest.mark.parametrize("model_class", [QRDQN, TQC, TRPO])
+@pytest.mark.parametrize("model_class", [QRDQN, TQC, TRPO, FRPPO])
 @pytest.mark.parametrize("channel_last", [False, True])
 def test_dict_spaces(model_class, channel_last):
     """
@@ -148,7 +148,7 @@ def test_dict_spaces(model_class, channel_last):
     kwargs = {}
     n_steps = 256
 
-    if model_class in {TRPO}:
+    if model_class in {TRPO, FRPPO}:
         kwargs = dict(
             n_steps=128,
             policy_kwargs=dict(
@@ -179,7 +179,7 @@ def test_dict_spaces(model_class, channel_last):
     evaluate_policy(model, env, n_eval_episodes=5, warn=False)
 
 
-@pytest.mark.parametrize("model_class", [QRDQN, TQC, TRPO])
+@pytest.mark.parametrize("model_class", [QRDQN, TQC, TRPO, FRPPO])
 @pytest.mark.parametrize("channel_last", [False, True])
 def test_dict_vec_framestack(model_class, channel_last):
     """
@@ -197,7 +197,7 @@ def test_dict_vec_framestack(model_class, channel_last):
     kwargs = {}
     n_steps = 256
 
-    if model_class in {TRPO}:
+    if model_class in {TRPO, FRPPO}:
         kwargs = dict(
             n_steps=128,
             policy_kwargs=dict(
@@ -228,7 +228,7 @@ def test_dict_vec_framestack(model_class, channel_last):
     evaluate_policy(model, env, n_eval_episodes=5, warn=False)
 
 
-@pytest.mark.parametrize("model_class", [QRDQN, TQC, TRPO])
+@pytest.mark.parametrize("model_class", [QRDQN, TQC, TRPO, FRPPO])
 def test_vec_normalize(model_class):
     """
     Additional tests to check observation space support
@@ -240,7 +240,7 @@ def test_vec_normalize(model_class):
     kwargs = {}
     n_steps = 256
 
-    if model_class in {TRPO}:
+    if model_class in {TRPO, FRPPO}:
         kwargs = dict(
             n_steps=128,
             policy_kwargs=dict(

@@ -4,7 +4,7 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.noise import NormalActionNoise
 from stable_baselines3.common.vec_env import VecNormalize
 
-from sb3_contrib import ARS, QRDQN, TQC, RecurrentPPO
+from sb3_contrib import ARS, QRDQN, TQC, RecurrentPPO, FRPPO
 from sb3_contrib.common.vec_env import AsyncEval
 
 N_STEPS_TRAINING = 500
@@ -12,7 +12,7 @@ SEED = 0
 ARS_MULTI = "ars_multi"
 
 
-@pytest.mark.parametrize("algo", [ARS, QRDQN, TQC, ARS_MULTI, RecurrentPPO])
+@pytest.mark.parametrize("algo", [ARS, QRDQN, TQC, ARS_MULTI, RecurrentPPO, FRPPO])
 def test_deterministic_training_common(algo):
     results = [[], []]
     rewards = [[], []]
