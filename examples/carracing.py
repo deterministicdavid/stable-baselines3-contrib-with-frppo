@@ -2,6 +2,7 @@ import multiprocessing
 import gymnasium as gym
 
 from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecFrameStack, VecMonitor
 
 import pynvml
@@ -58,13 +59,21 @@ if __name__ == '__main__':
     selected_device = select_free_gpu_or_fallback()
 
     # --- Create multiple async environments ---
-    num_envs = 12  # you can adjust this (4–12 works well depending on your CPU)
+    num_envs = 10  # you can adjust this (4–12 works well depending on your CPU)
     env_fns = [make_env(seed=i) for i in range(num_envs)]
     env = SubprocVecEnv(env_fns)
 
     # --- Add vectorized wrappers ---
     env = VecMonitor(env)               # tracks episode rewards/lengths
     env = VecFrameStack(env, n_stack=4) # stacks 4 frames per env
+
+    # --- Setup what we save --- 
+    log_dir="./logs/"
+    checkpoint_callback = CheckpointCallback(
+          save_freq=5_000,
+          save_path=log_dir,
+          name_prefix="ppo_carracing_model"
+        )
 
     # --- Create and train the model ---
     model = PPO(
@@ -73,11 +82,11 @@ if __name__ == '__main__':
         verbose=1,
         n_steps=1024,       # adjust batch sizes to your CPU/GPU
         batch_size=256,
-        tensorboard_log="./logs/",
+        tensorboard_log=log_dir,
         device=selected_device
     )
 
-    model.learn(total_timesteps=2_000_000)
+    model.learn(total_timesteps=2_000_000, callback=checkpoint_callback)
     model.save("ppo_carracing_async_stack")
 
     env.close()
