@@ -58,7 +58,7 @@ if __name__ == '__main__':
     selected_device = select_free_gpu_or_fallback()
 
     # --- Create multiple async environments ---
-    num_envs = 1  # you can adjust this (4–12 works well depending on your CPU)
+    num_envs = 12  # you can adjust this (4–12 works well depending on your CPU)
     env_fns = [make_env(seed=i) for i in range(num_envs)]
     env = SubprocVecEnv(env_fns)
 
