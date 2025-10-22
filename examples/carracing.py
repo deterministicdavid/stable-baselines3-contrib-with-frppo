@@ -1,8 +1,10 @@
 import multiprocessing
 import os
+import argparse
 import gymnasium as gym
 
-from stable_baselines3 import PPO
+#from stable_baselines3 import PPO
+from sb3_contrib import FRPPO
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack, VecMonitor
 
@@ -22,6 +24,7 @@ class OverwriteCheckpointCallback(BaseCallback):
     def __init__(self, save_freq: int, save_path: str, name_prefix: str = "latest_model", verbose: int = 0):
         super().__init__(verbose)
         self.save_freq = save_freq
+        self.num_saves = 0
         self.save_path = save_path
         # The full path for the save file, e.g., ./logs/latest_model.zip
         self.save_file = os.path.join(save_path, f"{name_prefix}.zip")
@@ -33,7 +36,8 @@ class OverwriteCheckpointCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         # self.num_timesteps is the total number of steps taken in the environment
-        if self.num_timesteps > 0 and self.num_timesteps % self.save_freq == 0:
+        if self.num_timesteps > (self.num_saves+1) * self.save_freq:
+            self.num_saves += 1
             self.model.save(self.save_file)
             if self.verbose > 0:
                 print(f"Saving latest model to {self.save_file}")
@@ -87,7 +91,7 @@ def train(env_name: str, log_dir: str, name_prefix: str, n_stack: int):
     selected_device = select_free_gpu_or_fallback()
 
     # --- Create multiple async environments ---
-    num_envs = 10  # you can adjust this (4–12 works well depending on your CPU)
+    num_envs = 6  # you can adjust this (4–12 works well depending on your CPU)
     env_fns = [make_env(env_name=env_name, seed=i) for i in range(num_envs)]
     env = SubprocVecEnv(env_fns)
 
@@ -103,17 +107,19 @@ def train(env_name: str, log_dir: str, name_prefix: str, n_stack: int):
         )
 
     # --- Create and train the model ---
-    model = PPO(
+    fr_tau_penalty = 0.01
+    model = FRPPO(
         "CnnPolicy",
         env,
         verbose=1,
         n_steps=1024,       # adjust batch sizes to your CPU/GPU
-        batch_size=256,
+        batch_size=1024,
+        fr_penalty_tau=fr_tau_penalty,
         tensorboard_log=log_dir,
         device=selected_device
     )
 
-    model.learn(total_timesteps=20_000, callback=checkpoint_callback)
+    model.learn(total_timesteps=2_000_000, callback=checkpoint_callback)
     save_file = os.path.join(log_dir, name_prefix)
     model.save(save_file)
 
@@ -140,7 +146,8 @@ def vizualize(env_name: str, model_path: str, n_stack: int):
         print(f"Model not found at {model_path}. Please run training first.")
         return
         
-    model = PPO.load(model_path, env=vec_env)
+    model = FRPPO.load(model_path, env=vec_env)
+    print(f"Model loaded from {model_path}.")
 
     # Run one episode
     obs = vec_env.reset()
@@ -163,14 +170,30 @@ def vizualize(env_name: str, model_path: str, n_stack: int):
 
 if __name__ == '__main__':
     # to fix debugging on MacOS
-    multiprocessing.set_start_method("spawn")
+    # multiprocessing.set_start_method("spawn")
+
+    # --- Add command line argument parsing ---
+    parser = argparse.ArgumentParser(description="Train or visualize a FRPPO agent for CarRacing-v3.")
+    parser.add_argument("--train", action="store_true", help="Run the training process.")
+    parser.add_argument("--visualise", action="store_true", help="Run the visualization process.")
+    args = parser.parse_args()
+
+
     n_stack = 4
     env_name = "CarRacing-v3"
     log_dir="./logs/"
-    name_prefix = "ppo_carracing_latest"
-    
-    train(env_name=env_name, log_dir=log_dir, name_prefix=name_prefix, n_stack=n_stack)
-    model_path = os.path.join(log_dir, f"{name_prefix}.zip")
-    vizualize(env_name=env_name, model_path=model_path, n_stack=n_stack)
+    name_prefix = "frppo_carracing_latest"
+
+    if not args.train and not args.visualise:
+        print("No action specified. Please use --train or --visualise (or both).")
+        parser.print_help()
+    else:
+        if args.train:
+            print("--- Running Training ---")
+            train(env_name=env_name, log_dir=log_dir, name_prefix=name_prefix, n_stack=n_stack)
+        if args.visualise:
+            print("--- Running Visualization ---")
+            model_path = os.path.join(log_dir, f"{name_prefix}.zip")
+            vizualize(env_name=env_name, model_path=model_path, n_stack=n_stack)
 
     

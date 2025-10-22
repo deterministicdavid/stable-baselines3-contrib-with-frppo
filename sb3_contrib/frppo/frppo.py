@@ -305,7 +305,7 @@ class FRPPO(OnPolicyAlgorithm):
         total_timesteps: int,
         callback: MaybeCallback = None,
         log_interval: int = 1,
-        tb_log_name: str = "PPO",
+        tb_log_name: str = "FRPPO",
         reset_num_timesteps: bool = True,
         progress_bar: bool = False,
     ) -> SelfFRPPO:
