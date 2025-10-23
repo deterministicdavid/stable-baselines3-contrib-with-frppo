@@ -140,7 +140,6 @@ def train(config: dict):
             verbose=1,
             n_steps=n_steps,       # adjust batch sizes to your CPU/GPU
             batch_size=batch_size,
-            fr_penalty_tau=fr_tau_penalty,
             tensorboard_log=log_dir,
             device=selected_device
         )
