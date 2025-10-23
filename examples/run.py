@@ -15,6 +15,8 @@ import pynvml
 import torch
 import random
 import yaml   
+import glob
+from moviepy import VideoFileClip
 
 class OverwriteCheckpointCallback(BaseCallback):
     """
@@ -184,6 +186,31 @@ def train(config: dict):
 
     env.close()
 
+
+def post_process_video(input_path: str, output_path: str, scale_factor: int = 4):
+    """
+    Loads a video, scales it up using nearest-neighbor (pixelated),
+    and saves the result.
+    """
+    try:
+        clip = VideoFileClip(input_path)
+        
+        # Scale the clip
+        # interp="nearest" is crucial for the pixel-art look
+        scaled_clip = clip.resized(width=clip.w * scale_factor)
+        
+        # Write the new video file
+        scaled_clip.write_videofile(output_path, logger=None)
+        
+        clip.close()
+        scaled_clip.close()
+        print(f"Scaled video saved to {output_path}")
+        
+    except Exception as e:
+        print(f"\nError during video post-processing: {e}")
+        print("Please ensure 'moviepy' is installed (`pip install moviepy`)")
+        print("And that 'ffmpeg' is available on your system.")
+
 def vizualize(config: dict):
     print("Starting visualization...")
     
@@ -199,6 +226,8 @@ def vizualize(config: dict):
 
     os.makedirs(video_folder, exist_ok=True)
 
+
+
     # --- Helper function to create the visualization env ---
     def make_viz_env():
         """Creates and wraps the environment for visualization."""
@@ -206,6 +235,8 @@ def vizualize(config: dict):
             print("Atari environment detected. Using Atari-specific wrappers for visualization.")
             # Add frameskip=1 to disable internal frame skipping for Atari
             env = gym.make(env_name, render_mode="rgb_array", frameskip=1)
+            # 1. Wrap for video *first* to capture the full-resolution render
+            env = gym.wrappers.RecordVideo(env, video_folder=video_folder, episode_trigger=lambda e: e == 0)
             # Apply Atari preprocessing
             # *** terminal_on_life_loss=True ***
             # This is the key fix: it makes the env send `done=True` after one life is lost.
@@ -215,10 +246,9 @@ def vizualize(config: dict):
             print("Default environment detected.")
             # Non-Atari env
             env = gym.make(env_name, render_mode="rgb_array")
+            env = gym.wrappers.RecordVideo(env, video_folder=video_folder, episode_trigger=lambda e: e == 0)
+
         
-        # Wrap the environment to record a video
-        # Trigger recording only for the first episode (episode_id == 0).
-        env = gym.wrappers.RecordVideo(env, video_folder=video_folder, episode_trigger=lambda e: e == 0)
         return env
     
     # Wrap for SB3 and FrameStack (must match training setup)
@@ -265,6 +295,20 @@ def vizualize(config: dict):
     # The video is saved automatically when the environment is closed
     vec_env.close()
     print(f"Visualization complete. Video saved in '{video_folder}' folder. Total steps is {step}. Total reward is {rewsum}.")
+
+    # --- ADD THIS LOGIC ---
+    # Find the most recently created video file in the folder
+    list_of_files = glob.glob(os.path.join(video_folder, '*.mp4'))
+    if not list_of_files:
+        print("Error: No video file found to post-process.")
+        return
+
+    latest_file = max(list_of_files, key=os.path.getctime)
+    output_file = os.path.join(video_folder, f"scaled_{os.path.basename(latest_file)}")
+
+    # Scale the video
+    post_process_video(latest_file, output_file, scale_factor=4)
+
 
 if __name__ == '__main__':
     # to fix debugging on MacOS
