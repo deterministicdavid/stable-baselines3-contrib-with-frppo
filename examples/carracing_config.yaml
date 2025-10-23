@@ -1,0 +1,24 @@
+# config.yaml
+# Configuration for PPO CarRacing training
+
+# --- General Env ---
+env_name: "CarRacing-v3"
+n_stack: 8
+
+# --- Training Parameters ---
+train:
+  algo: "PPO"
+  n_envs: 6 # Default number of parallel environments
+  n_steps: 1000 # number of steps to do in an environment
+  batch_size: 1024
+  total_timesteps: 2000000
+
+# --- Logging & Saving ---
+logging:
+  log_dir: "./logs/"
+  name_prefix: "ppo_carracing_latest"
+  checkpoint_save_freq: 10000 # OverwriteCheckpointCallback save frequency
+
+# --- Visualization ---
+visualize:
+  video_folder: "videos/"

@@ -3,7 +3,8 @@ import os
 import argparse
 import gymnasium as gym
 
-#from stable_baselines3 import PPO
+
+from stable_baselines3 import PPO
 from sb3_contrib import FRPPO
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack, VecMonitor
@@ -12,6 +13,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFram
 import pynvml
 import torch
 import random
+import yaml   
 
 class OverwriteCheckpointCallback(BaseCallback):
     """
@@ -87,11 +89,21 @@ def make_env(env_name: str, seed: int):
         return env
     return _init
 
-def train(env_name: str, log_dir: str, name_prefix: str, n_stack: int):
+def train(config: dict):
     selected_device = select_free_gpu_or_fallback()
 
-    # --- Create multiple async environments ---
-    num_envs = 6  # you can adjust this (4–12 works well depending on your CPU)
+    learning_algo = config['train']['algo']
+    env_name = config['env_name']
+    n_stack = config['n_stack']
+    num_envs = config['train']['n_envs']
+    log_dir = config['logging']['log_dir']
+    name_prefix = config['logging']['name_prefix']
+    save_freq = config['logging']['checkpoint_save_freq']
+    n_steps = config['train']['n_steps']
+    batch_size = config['train']['batch_size']
+    total_timesteps = config['train']['total_timesteps']
+    
+    
     env_fns = [make_env(env_name=env_name, seed=i) for i in range(num_envs)]
     env = SubprocVecEnv(env_fns)
 
@@ -101,34 +113,58 @@ def train(env_name: str, log_dir: str, name_prefix: str, n_stack: int):
 
     # --- Setup what we save --- 
     checkpoint_callback = OverwriteCheckpointCallback(
-          save_freq=10000,  # This is now based on total timesteps
+          save_freq=save_freq,  # This is now based on total timesteps
           save_path=log_dir,
           name_prefix=name_prefix
         )
 
     # --- Create and train the model ---
-    fr_tau_penalty = 0.01
-    model = FRPPO(
-        "CnnPolicy",
-        env,
-        verbose=1,
-        n_steps=1024,       # adjust batch sizes to your CPU/GPU
-        batch_size=1024,
-        fr_penalty_tau=fr_tau_penalty,
-        tensorboard_log=log_dir,
-        device=selected_device
-    )
+    
+    model = None
+    if learning_algo == "FRPPO":
+        fr_tau_penalty = 0.001
+        model = FRPPO(
+            "CnnPolicy",
+            env,
+            verbose=1,
+            n_steps=n_steps,       # adjust batch sizes to your CPU/GPU
+            batch_size=batch_size,
+            fr_penalty_tau=fr_tau_penalty,
+            tensorboard_log=log_dir,
+            device=selected_device
+        )
+    elif learning_algo == "PPO":
+        model = PPO(
+            "CnnPolicy",
+            env,
+            verbose=1,
+            n_steps=n_steps,       # adjust batch sizes to your CPU/GPU
+            batch_size=batch_size,
+            fr_penalty_tau=fr_tau_penalty,
+            tensorboard_log=log_dir,
+            device=selected_device
+        )
+    else:
+        print(f"Learning algorithm {learning_algo} may be in SB3 but not it's not been setup here.")
+        return
 
-    model.learn(total_timesteps=2_000_000, callback=checkpoint_callback)
+    model.learn(total_timesteps=total_timesteps, callback=checkpoint_callback)
     save_file = os.path.join(log_dir, name_prefix)
     model.save(save_file)
 
     env.close()
 
-def vizualize(env_name: str, model_path: str, n_stack: int):
+def vizualize(config: dict):
     print("Starting visualization...")
     
-    video_folder = "videos/"
+    learning_algo = config['train']['algo']
+    env_name = config['env_name']
+    n_stack = config['n_stack']
+    video_folder = config['visualize']['video_folder']
+    log_dir = config['logging']['log_dir']
+    name_prefix = config['logging']['name_prefix']
+    model_path = os.path.join(log_dir, f"{name_prefix}.zip")
+
     os.makedirs(video_folder, exist_ok=True)
 
     # Create a single environment for visualization
@@ -146,7 +182,15 @@ def vizualize(env_name: str, model_path: str, n_stack: int):
         print(f"Model not found at {model_path}. Please run training first.")
         return
         
-    model = FRPPO.load(model_path, env=vec_env)
+    model = None
+    if learning_algo == "FRPPO":
+        model = FRPPO.load(model_path, env=vec_env)
+    elif learning_algo == "PPO":
+        model = PPO.load(model_path, env=vec_env)
+    else: 
+        print(f"Learning algorithm {learning_algo} may be in SB3 but not it's not been setup here.")
+        return
+
     print(f"Model loaded from {model_path}.")
 
     # Run one episode
@@ -176,24 +220,28 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Train or visualize a FRPPO agent for CarRacing-v3.")
     parser.add_argument("--train", action="store_true", help="Run the training process.")
     parser.add_argument("--visualise", action="store_true", help="Run the visualization process.")
+    parser.add_argument("--numenvs", type=int, default=6, help="Number of parallel environments to use for training.")
+    parser.add_argument("--config", type=str, default="config.yaml", help="Path to the configuration YAML file.")
     args = parser.parse_args()
+    
+    config_path = args.config
+    if not os.path.exists(config_path):
+        print(f"Error: Config file not found at {config_path}")
+        parser.print_help()
+        exit(1)
 
-
-    n_stack = 4
-    env_name = "CarRacing-v3"
-    log_dir="./logs/"
-    name_prefix = "frppo_carracing_latest"
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
 
     if not args.train and not args.visualise:
         print("No action specified. Please use --train or --visualise (or both).")
         parser.print_help()
     else:
         if args.train:
-            print("--- Running Training ---")
-            train(env_name=env_name, log_dir=log_dir, name_prefix=name_prefix, n_stack=n_stack)
+            print(f"--- Running Training --- up to a total of {config['train']['total_timesteps']}")
+            train(config=config)
         if args.visualise:
             print("--- Running Visualization ---")
-            model_path = os.path.join(log_dir, f"{name_prefix}.zip")
-            vizualize(env_name=env_name, model_path=model_path, n_stack=n_stack)
+            vizualize(config=config)
 
     
