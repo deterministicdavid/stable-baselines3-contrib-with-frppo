@@ -29,14 +29,14 @@ keys/
 .vscode
 
 # Videos
-videos
+videos*/
 
 *.sublime-project
 *.sublime-workspace
 
 .idea
 
-logs/
+logs*/
 
 .ipynb_checkpoints
 ghostdriver.log

@@ -12,6 +12,8 @@ train:
   n_steps: 1000 # number of steps to do in an environment
   batch_size: 1024
   total_timesteps: 2000000
+  fr_tau_penalty: 0.001
+  ent_coef: 0.01
 
 # --- Logging & Saving ---
 logging:
