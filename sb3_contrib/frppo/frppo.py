@@ -283,8 +283,10 @@ class FRPPO(OnPolicyAlgorithm):
                 break
 
         explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
+        max_advantage = np.max(self.rollout_buffer.advantages)
 
         # Logs
+        self.logger.record("train/max_advantage", max_advantage)
         self.logger.record("train/entropy_loss", np.mean(entropy_losses))
         self.logger.record("train/policy_gradient_loss", np.mean(pg_losses))
         self.logger.record("train/value_loss", np.mean(value_losses))
