@@ -227,7 +227,7 @@ class FRPPO(OnPolicyAlgorithm):
                 # FR2 distance
                 fr2 = 4.0 * th.mean(th.square(th.exp(0.5*log_prob) - th.exp(0.5*rollout_data.old_log_prob)))
                 fr2_penalty = (1.0/(2.0*fr_penalty_tau)) * fr2
-                if self.fr_penalty_scale_by_adv and max_advantage > 1.0:
+                if self.fr_penalty_scale_by_adv:
                     fr2_penalty *= max_advantage 
 
                 adv_ratio_mean = th.mean(advantages * ratio)
