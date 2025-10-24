@@ -88,6 +88,7 @@ class FRPPO(OnPolicyAlgorithm):
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
         fr_penalty_tau: Union[float, Schedule] = 1e-3,
+        fr_penalty_scale_by_adv: bool = False,
         clip_range_vf: Union[None, float, Schedule] = None,
         normalize_advantage: bool = True,
         ent_coef: float = 0.0,
@@ -163,6 +164,7 @@ class FRPPO(OnPolicyAlgorithm):
         self.batch_size = batch_size
         self.n_epochs = n_epochs
         self.fr_penalty_tau = fr_penalty_tau
+        self.fr_penalty_scale_by_adv = fr_penalty_scale_by_adv
         self.clip_range_vf = clip_range_vf
         self.normalize_advantage = normalize_advantage
         self.target_kl = target_kl
@@ -199,6 +201,7 @@ class FRPPO(OnPolicyAlgorithm):
         pg_losses, value_losses = [], []
         fr2_penalties = []
 
+        max_advantage = np.max(self.rollout_buffer.advantages)
         continue_training = True
         # train for n_epochs epochs
         for epoch in range(self.n_epochs):
@@ -224,6 +227,8 @@ class FRPPO(OnPolicyAlgorithm):
                 # FR2 distance
                 fr2 = 4.0 * th.mean(th.square(th.exp(0.5*log_prob) - th.exp(0.5*rollout_data.old_log_prob)))
                 fr2_penalty = (1.0/(2.0*fr_penalty_tau)) * fr2
+                if self.fr_penalty_scale_by_adv and max_advantage > 1.0:
+                    fr2_penalty *= max_advantage 
 
                 adv_ratio_mean = th.mean(advantages * ratio)
                 policy_loss = -adv_ratio_mean + fr2_penalty
@@ -283,7 +288,7 @@ class FRPPO(OnPolicyAlgorithm):
                 break
 
         explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
-        max_advantage = np.max(self.rollout_buffer.advantages)
+        
 
         # Logs
         self.logger.record("train/max_advantage", max_advantage)

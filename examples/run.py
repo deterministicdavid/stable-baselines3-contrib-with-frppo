@@ -94,6 +94,7 @@ def train(config: dict):
     model = None
     if learning_algo == "FRPPO":
         fr_tau_penalty = config['train']['fr_tau_penalty']
+        fr_penalty_scale_by_adv = config['train']['fr_scale_by_adv']
         model = FRPPO(
             policy=policy,
             env=env,
@@ -101,6 +102,7 @@ def train(config: dict):
             n_steps=n_steps,       # adjust batch sizes to your CPU/GPU
             batch_size=batch_size,
             fr_penalty_tau=fr_tau_penalty,
+            fr_penalty_scale_by_adv=fr_penalty_scale_by_adv,
             ent_coef=ent_coef,
             tensorboard_log=log_dir,
             device=selected_device
