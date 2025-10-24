@@ -16,6 +16,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
+# --- Custom Policy with Separate Actor/Critic Networks ---
 class CustomActorCriticCnnPolicy(ActorCriticPolicy):
     """
     Custom policy for PPO with separate CNNs for actor and critic.
@@ -28,21 +29,29 @@ class CustomActorCriticCnnPolicy(ActorCriticPolicy):
         lr_schedule,
         **kwargs,
     ):
-        # We call the parent init, but we will override the
-        # network creation.
+        # --- FIX 1: Set a flag to defer optimizer creation ---
+        self._networks_defined = False
+        
+        # --- Call super().__init__() normally ---
+        # This call *will* trigger self.build_optimizer() below.
         super().__init__(
             observation_space,
             action_space,
             lr_schedule,
             **kwargs,
         )
-        # Deactivate the default networks created by parent
-        # (features_extractor, mlp_extractor, action_net, value_net)
-        # by simply overriding them with our own.
+        
+        # --- Deactivate default network attributes ---
+        # We must set them to None so the parent class doesn't try to use them
+        self.features_extractor = None
+        self.mlp_extractor = None
+        self.action_net = None
+        self.value_net = None
+
 
         # The observation space is already (C, H, W) = (4, 84, 84)
         # due to the VecTransposeImage wrapper
-        n_input_channels = observation_space.shape[0] # <-- FIX 1: Use shape[0]
+        n_input_channels = observation_space.shape[0]
         
         # --- Define the CNN base ---
         # This function creates one copy of the CNN base
@@ -68,6 +77,27 @@ class CustomActorCriticCnnPolicy(ActorCriticPolicy):
         # --- Critic Network (Value) ---
         self.critic_cnn = create_cnn_base()
         self.critic_head = layer_init(nn.Linear(512, 1), std=1)
+
+        # --- FIX 2: Manually build the optimizer *after* networks are created ---
+        self._networks_defined = True
+        self.build_optimizer(lr_schedule)
+
+    def build_optimizer(self, lr_schedule) -> None:
+        """
+        Override the build_optimizer method.
+        This method is called by super().__init__(), but we use a flag
+        to prevent it from running until our custom networks are defined.
+        """
+        # --- FIX 3: Defer the optimizer creation ---
+        if not getattr(self, "_networks_defined", False):
+            return  # Do nothing if called from super().__init__
+        
+        # When called manually from self.__init__(), proceed as normal.
+        # This will correctly gather params from self.actor_cnn etc.
+        # --- REPLICATE BasePolicy.build_optimizer ---
+        # This avoids the super() call that was causing the AttributeError
+        self.optimizer = self.optimizer_class(self.parameters(), lr=lr_schedule(1), **self.optimizer_kwargs)
+
 
     def _get_action_dist_from_latent(self, latent_pi: torch.Tensor):
         """
@@ -108,6 +138,18 @@ class CustomActorCriticCnnPolicy(ActorCriticPolicy):
         value = self.critic_head(latent_vf)
         
         return action, value, log_prob
+    
+    def predict_values(self, obs: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass for predicting values (used in collect_rollouts).
+        """
+        # obs is already (N, C, H, W) and uint8
+        obs_float = obs.float() / 255.0
+        
+        # Critic
+        latent_vf = self.critic_cnn(obs_float) # <-- Pass float tensor
+        value = self.critic_head(latent_vf)
+        return value
 
     def evaluate_actions(self, obs: torch.Tensor, actions: torch.Tensor):
         """
