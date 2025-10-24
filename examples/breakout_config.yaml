@@ -8,12 +8,13 @@ n_stack: 4
 # --- Training Parameters ---
 train:
   algo: "PPO"
-  n_envs: 12 # Default number of parallel environments
+  policy: "own" # either "own" or "default"
+  n_envs: 8 # Default number of parallel environments
   n_steps: 1024 # number of steps to do in an environment
   batch_size: 1024
-  total_timesteps: 20000000
+  total_timesteps: 100000000
   fr_tau_penalty: 0.00001
-  ent_coef: 0.1
+  ent_coef: 0.0
 
 # --- Logging & Saving ---
 logging:
@@ -24,4 +25,4 @@ logging:
 # --- Visualization ---
 visualize:
   video_folder: "videos_breakout/"
-  deterministic: false
+  deterministic: true
