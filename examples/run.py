@@ -103,6 +103,7 @@ def train(config: dict):
             policy=policy,
             env=env,
             verbose=1,
+            learning_rate=learning_rate,
             n_steps=n_steps,       # adjust batch sizes to your CPU/GPU
             batch_size=batch_size,
             fr_penalty_tau=fr_tau_penalty,
@@ -116,6 +117,7 @@ def train(config: dict):
             policy=policy,
             env=env,
             verbose=1,
+            learning_rate=learning_rate,
             n_steps=n_steps,       # adjust batch sizes to your CPU/GPU
             batch_size=batch_size,
             ent_coef=ent_coef,
