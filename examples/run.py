@@ -92,6 +92,10 @@ def train(config: dict):
         policy = CustomActorCriticCnnPolicy
 
     model = None
+    learning_rate = 3e-4 
+    if config['train']['decay_lr']:
+        learning_rate = lambda f : f * 2.5e-4
+
     if learning_algo == "FRPPO":
         fr_tau_penalty = config['train']['fr_tau_penalty']
         fr_penalty_scale_by_adv = config['train']['fr_scale_by_adv']
