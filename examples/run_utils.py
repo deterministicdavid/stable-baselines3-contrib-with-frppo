@@ -54,7 +54,7 @@ def select_free_gpu_or_fallback():
 
         device_count = torch.cuda.device_count()
         gpu_indices = list(range(device_count))
-        random.shuffle(gpu_indices)  # Randomize the order of GPU checks
+        # random.shuffle(gpu_indices)  # Randomize the order of GPU checks
 
         best_gpu = None
         max_free_mem = 0
