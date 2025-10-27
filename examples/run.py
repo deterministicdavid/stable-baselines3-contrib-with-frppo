@@ -113,6 +113,8 @@ def train(config: dict):
             device=selected_device
         )
     elif learning_algo == "PPO":
+        default_clip_epsilon = 0.2 
+        clip_epsilon = config.get('train', {}).get('clip_epsilon', default_clip_epsilon)
         model = PPO(
             policy=policy,
             env=env,
@@ -121,6 +123,7 @@ def train(config: dict):
             n_steps=n_steps,       # adjust batch sizes to your CPU/GPU
             batch_size=batch_size,
             ent_coef=ent_coef,
+            clip_range=clip_epsilon,
             tensorboard_log=log_dir,
             device=selected_device
         )
