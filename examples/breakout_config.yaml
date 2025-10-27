@@ -14,7 +14,9 @@ train:
   batch_size: 1024
   total_timesteps: 100000000
   fr_tau_penalty: 0.00001
+  fr_scale_by_adv: true
   ent_coef: 0.0
+  decay_lr: true
 
 # --- Logging & Saving ---
 logging:

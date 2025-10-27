@@ -95,6 +95,9 @@ def train(config: dict):
     learning_rate = 3e-4 
     if config['train']['decay_lr']:
         learning_rate = lambda f : f * 2.5e-4
+    
+    default_n_opt_epochs = 4
+    n_opt_epochs = config.get('train', {}).get('n_opt_epochs', default_n_opt_epochs)
 
     if learning_algo == "FRPPO":
         fr_tau_penalty = config['train']['fr_tau_penalty']
@@ -104,7 +107,8 @@ def train(config: dict):
             env=env,
             verbose=1,
             learning_rate=learning_rate,
-            n_steps=n_steps,       # adjust batch sizes to your CPU/GPU
+            n_steps=n_steps,       
+            n_epochs=n_opt_epochs,
             batch_size=batch_size,
             fr_penalty_tau=fr_tau_penalty,
             fr_penalty_scale_by_adv=fr_penalty_scale_by_adv,
@@ -120,7 +124,8 @@ def train(config: dict):
             env=env,
             verbose=1,
             learning_rate=learning_rate,
-            n_steps=n_steps,       # adjust batch sizes to your CPU/GPU
+            n_steps=n_steps, 
+            n_epochs=n_opt_epochs,
             batch_size=batch_size,
             ent_coef=ent_coef,
             clip_range=clip_epsilon,
