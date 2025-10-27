@@ -207,7 +207,7 @@ def vizualize(config: dict):
     done = False
     rewsum = 0
     step = 0
-    MAX_STEPS = 1_000
+    MAX_STEPS = 100_000
     while not done:
         step += 1
         # Use deterministic actions for evaluation
