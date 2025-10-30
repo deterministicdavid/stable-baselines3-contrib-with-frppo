@@ -2,6 +2,7 @@ import os
 import argparse
 import gymnasium as gym
 import ale_py
+import numpy as np
 
 from gymnasium.wrappers import AtariPreprocessing
 from stable_baselines3 import PPO
@@ -18,6 +19,17 @@ import yaml
 from run_utils import OverwriteCheckpointCallback, select_free_gpu_or_fallback, post_process_video
 from own_policy import CustomActorCriticCnnPolicy
 
+class ClipRewardWrapper(gym.Wrapper):
+    """
+    Clip the reward to {+1, 0, -1} by its sign.
+    """
+    def __init__(self, env):
+        super().__init__(env)
+    
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        return obs, np.sign(reward), terminated, truncated, info
+
 # --- Helper function to create environments ---
 def make_env_default(env_name: str, seed: int):
     def _init():
@@ -27,7 +39,7 @@ def make_env_default(env_name: str, seed: int):
         return env
     return _init
 
-def make_env_atari(env_name: str, seed: int):
+def make_env_atari(env_name: str, seed: int, bin_rewards=True):
     """
     Utility function for multiprocessed env creation.
     
@@ -40,11 +52,26 @@ def make_env_atari(env_name: str, seed: int):
         env = gym.make(env_name, render_mode="rgb_array", frameskip=1)
         env.reset(seed=seed)
         
-        # Apply standard Atari preprocessing
-        # This will gray-scale, resize, and handle frame-skipping
-        # terminal_on_life_loss=False is default, which is correct for training
-        env = AtariPreprocessing(env, grayscale_newaxis=True, frame_skip=4)
         
+
+        """
+        We try to follow "The 37 implementation details of Proximal Policy Optimization"
+        - Using noop_max=30, which is the default, is #1 
+        - Setting frame_skip=4 and using max pooling (which it does if frame_skip>1) is #2
+        - Setting terminal_on_life_loss=True is #3. 
+        - By default the AtariPreprocessing will resize to 84x84, this is #5.
+        """
+        # Setting scale_obs=True is 9 of "The 37 implementation details of Proximal Policy Optimization"
+        # But when using CnnPolicy SB3 does this anyway and our custom policy does that too, so scale_obs=False
+        # should be fine.
+        # Using frame_skip=4 
+        env = AtariPreprocessing(env, noop_max=30, grayscale_newaxis=True, terminal_on_life_loss=True, frame_skip=4, scale_obs=False)
+        
+        if bin_rewards:
+            # This is number #6 of "The 37 implementation details of Proximal Policy Optimization"
+            # Will bin rewards to the bins {-1,0,+1}
+            env = ClipRewardWrapper(env)
+
         # Record stats
         env = gym.wrappers.RecordEpisodeStatistics(env)
 
@@ -66,16 +93,24 @@ def train(config: dict):
     total_timesteps = config['train']['total_timesteps']
     ent_coef = config['train']['ent_coef']
     
+    # Note that using CnnPolicy makes SB3 normalize images to [0,1], 
+    # which is #9 of "The 37 implementation details of Proximal Policy Optimization"
+    policy = "CnnPolicy"
+    if config['train']['policy'] == "own":
+        policy = CustomActorCriticCnnPolicy # this will also normalize to [0,1]
+
     if env_name.startswith("ALE/"):
         env_fns = [make_env_atari(env_name=env_name, seed=i) for i in range(num_envs)]
     else:
-        env_fns = [make_env_default(env_name, seed=i, n_stack=n_stack) for i in range(num_envs)]
+        env_fns = [make_env_default(env_name, seed=i) for i in range(num_envs)]
         
     env = SubprocVecEnv(env_fns)
 
     # --- Add vectorized wrappers ---
-    env = VecMonitor(env)               # tracks episode rewards/lengths
-    env = VecFrameStack(env, n_stack=n_stack) # stacks 4 frames per env
+    env = VecMonitor(env)               
+    
+    # Using frame stacking with n_stack=4 is #7 of "The 37 implementation details of Proximal Policy Optimization"
+    env = VecFrameStack(env, n_stack=n_stack) 
 
     # --- Setup what we save --- 
     checkpoint_callback = OverwriteCheckpointCallback(
@@ -87,10 +122,7 @@ def train(config: dict):
     # --- Create and train the model ---
     
     
-    policy = "CnnPolicy"
-    if config['train']['policy'] == "own":
-        policy = CustomActorCriticCnnPolicy
-
+    
     model = None
     learning_rate = 3e-4 
     if config['train']['decay_lr']:
