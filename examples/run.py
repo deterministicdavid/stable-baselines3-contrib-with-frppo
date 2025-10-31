@@ -21,16 +21,6 @@ import yaml
 from run_utils import OverwriteCheckpointCallback, select_free_gpu_or_fallback, post_process_video
 from own_policy import CustomActorCriticCnnPolicy
 
-class ClipRewardWrapper(gym.Wrapper):
-    """
-    Clip the reward to {+1, 0, -1} by its sign.
-    """
-    def __init__(self, env):
-        super().__init__(env)
-    
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        return obs, np.sign(reward), terminated, truncated, info
 
 # --- Helper function to create environments ---
 def make_env_default(env_name: str, seed: int):
@@ -41,42 +31,6 @@ def make_env_default(env_name: str, seed: int):
         return env
     return _init
 
-def make_env_atari(env_name: str, seed: int, bin_rewards=True):
-    """
-    Utility function for multiprocessed env creation.
-    
-    :param env_name: the environment ID
-    :param seed: the initial seed for RNG
-    :param n_stack: Number of frames to stack
-    """
-    def _init():
-        # Add frameskip=1 to disable internal frame skipping
-        env = gym.make(env_name, render_mode="rgb_array", frameskip=1)
-        env.reset(seed=seed)
-        
-        """
-        We try to follow "The 37 implementation details of Proximal Policy Optimization"
-        - Using noop_max=30, which is the default, is #1 
-        - Setting frame_skip=4 and using max pooling (which it does if frame_skip>1) is #2
-        - Setting terminal_on_life_loss=True is #3. 
-        - By default the AtariPreprocessing will resize to 84x84, this is #5.
-        """
-        # Setting scale_obs=True is 9 of "The 37 implementation details of Proximal Policy Optimization"
-        # But when using CnnPolicy SB3 does this anyway and our custom policy does that too, so scale_obs=False
-        # should be fine.
-        # Using frame_skip=4 
-        env = AtariPreprocessing(env, noop_max=30, grayscale_newaxis=True, terminal_on_life_loss=True, frame_skip=4, scale_obs=False)
-        
-        if bin_rewards:
-            # This is number #6 of "The 37 implementation details of Proximal Policy Optimization"
-            # Will bin rewards to the bins {-1,0,+1}
-            env = ClipRewardWrapper(env)
-
-        # Record stats
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-
-        return env
-    return _init
 
 def train(config: dict):
     selected_device = select_free_gpu_or_fallback()
