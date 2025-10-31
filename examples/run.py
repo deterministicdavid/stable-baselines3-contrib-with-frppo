@@ -151,7 +151,9 @@ def train(config: dict):
         print(f"Learning algorithm {learning_algo} may be in SB3 but not it's not been setup here.")
         return
 
-    new_logger = configure(log_dir, ["stdout", "csv", "tensorboard"])
+    tb_path = os.path.join(log_dir, f"{model.__class__.__name__}_{config['train']['run_id']}")
+    os.makedirs(tb_path, exist_ok=True)
+    new_logger = configure(tb_path, ["stdout", "csv", "tensorboard"])
     model.set_logger(new_logger)
     log_hyper_parameters(logger=model.logger, config=config)
 
