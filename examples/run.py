@@ -37,6 +37,7 @@ def train(config: dict):
 
     learning_algo = config['train']['algo']
     env_name = config['env_name']
+    env_is_atari = n_opt_epochs = config.get('env_is_atari', True)
     n_stack = config['n_stack']
     num_envs = config['train']['n_envs']
     log_dir = config['logging']['log_dir']
@@ -47,13 +48,15 @@ def train(config: dict):
     total_timesteps = config['train']['total_timesteps']
     ent_coef = config['train']['ent_coef']
     
+
     # Note that using CnnPolicy makes SB3 normalize images to [0,1], 
     # which is #9 of "The 37 implementation details of Proximal Policy Optimization"
     policy = "CnnPolicy"
     if config['train']['policy'] == "own":
         policy = CustomActorCriticCnnPolicy # this will also normalize to [0,1]
 
-    if env_name.startswith("ALE/"):
+    #if env_name.startswith("ALE/"):
+    if env_is_atari:
         # env_fns = [make_env_atari(env_name=env_name, seed=i) for i in range(num_envs)]
         env = make_atari_env(
             env_id=env_name,
