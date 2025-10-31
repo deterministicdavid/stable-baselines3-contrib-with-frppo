@@ -7,6 +7,7 @@ import numpy as np
 from gymnasium.wrappers import AtariPreprocessing
 from stable_baselines3 import PPO
 from sb3_contrib import FRPPO
+from stable_baselines3.common.logger import configure
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack, VecMonitor, VecVideoRecorder
 from stable_baselines3.common.torch_layers import NatureCNN
@@ -18,7 +19,7 @@ import torch
 import random
 import yaml   
 
-from run_utils import OverwriteCheckpointCallback, select_free_gpu_or_fallback, post_process_video
+from run_utils import OverwriteCheckpointCallback, select_free_gpu_or_fallback, post_process_video, log_hyper_parameters
 from own_policy import CustomActorCriticCnnPolicy
 
 
@@ -149,6 +150,10 @@ def train(config: dict):
     else:
         print(f"Learning algorithm {learning_algo} may be in SB3 but not it's not been setup here.")
         return
+
+    new_logger = configure(log_dir, ["stdout", "csv", "tensorboard"])
+    model.set_logger(new_logger)
+    log_hyper_parameters(logger=model.logger, config=config)
 
     model.learn(total_timesteps=total_timesteps, callback=checkpoint_callback)
     save_file = os.path.join(log_dir, name_prefix)

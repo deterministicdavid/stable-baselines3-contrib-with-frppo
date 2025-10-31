@@ -96,3 +96,32 @@ def post_process_video(input_path: str, output_path: str, scale_factor: int = 4)
         print(f"\nError during video post-processing: {e}")
         print("Please ensure 'moviepy' is installed (`pip install moviepy`)")
         print("And that 'ffmpeg' is available on your system.")
+
+
+def flatten_dict(d, parent_key='', sep='.'):
+    """
+    Flattens a nested dictionary, joining keys with a separator.
+    e.g., {'train': {'algo': 'PPO'}} -> {'train.algo': 'PPO'}
+    """
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
+
+
+def log_hyper_parameters(logger, config):
+    
+    # Flatten the config
+    flat_config = flatten_dict(config)
+    
+    # Filter for simple types and convert to string for add_hparams
+    for k, v in flat_config.items():
+        logger.record(f"hyperparameters/{k}", v)
+    
+    logger.dump(step=0)
+    print("Logged hyperparameters to TensorBoard HParams tab.")
+    
