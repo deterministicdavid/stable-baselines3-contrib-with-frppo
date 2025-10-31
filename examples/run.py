@@ -178,7 +178,8 @@ def vizualize(config: dict):
     # --- Helper function to create the visualization env ---
     def make_viz_env():
         """Creates and wraps the environment for visualization."""
-        if env_name.startswith("ALE/"):
+        env_is_atari = n_opt_epochs = config.get('env_is_atari', True)
+        if env_is_atari:
             print("Atari environment detected. Using Atari-specific wrappers for visualization.")
             # Add frameskip=1 to disable internal frame skipping for Atari
             env = gym.make(env_name, render_mode="rgb_array", frameskip=1)
