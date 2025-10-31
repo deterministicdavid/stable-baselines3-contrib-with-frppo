@@ -9,6 +9,8 @@ from stable_baselines3 import PPO
 from sb3_contrib import FRPPO
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack, VecMonitor
+from stable_baselines3.common.torch_layers import NatureCNN
+from stable_baselines3.common.env_util import make_atari_env
 
 
 import glob
@@ -52,8 +54,6 @@ def make_env_atari(env_name: str, seed: int, bin_rewards=True):
         env = gym.make(env_name, render_mode="rgb_array", frameskip=1)
         env.reset(seed=seed)
         
-        
-
         """
         We try to follow "The 37 implementation details of Proximal Policy Optimization"
         - Using noop_max=30, which is the default, is #1 
@@ -100,14 +100,27 @@ def train(config: dict):
         policy = CustomActorCriticCnnPolicy # this will also normalize to [0,1]
 
     if env_name.startswith("ALE/"):
-        env_fns = [make_env_atari(env_name=env_name, seed=i) for i in range(num_envs)]
+        # env_fns = [make_env_atari(env_name=env_name, seed=i) for i in range(num_envs)]
+        env = make_atari_env(
+            env_id=env_name,
+            n_envs=num_envs,
+            seed=1,
+            wrapper_kwargs={
+                "noop_max": 30,
+                "frame_skip": 4,
+                "screen_size": 84,
+                "terminal_on_life_loss": True,
+                "clip_reward": True,
+                "action_repeat_probability": 0.0,
+            },
+            vec_env_cls=DummyVecEnv,
+        )
+        
     else:
         env_fns = [make_env_default(env_name, seed=i) for i in range(num_envs)]
-        
-    env = SubprocVecEnv(env_fns)
-
-    # --- Add vectorized wrappers ---
-    env = VecMonitor(env)               
+        env = SubprocVecEnv(env_fns)
+        env = VecMonitor(env)               
+    
     
     # Using frame stacking with n_stack=4 is #7 of "The 37 implementation details of Proximal Policy Optimization"
     env = VecFrameStack(env, n_stack=n_stack) 
@@ -146,7 +159,13 @@ def train(config: dict):
             fr_penalty_scale_by_adv=fr_penalty_scale_by_adv,
             ent_coef=ent_coef,
             tensorboard_log=log_dir,
-            device=selected_device
+            device=selected_device,
+            policy_kwargs={
+                "ortho_init": True,
+                "features_extractor_class": NatureCNN,
+                "share_features_extractor": True,
+                "normalize_images": True,
+        },
         )
     elif learning_algo == "PPO":
         default_clip_epsilon = 0.2 
@@ -162,7 +181,13 @@ def train(config: dict):
             ent_coef=ent_coef,
             clip_range=clip_epsilon,
             tensorboard_log=log_dir,
-            device=selected_device
+            device=selected_device,
+            policy_kwargs={
+                "ortho_init": True,
+                "features_extractor_class": NatureCNN,
+                "share_features_extractor": True,
+                "normalize_images": True,
+            },
         )
     else:
         print(f"Learning algorithm {learning_algo} may be in SB3 but not it's not been setup here.")
