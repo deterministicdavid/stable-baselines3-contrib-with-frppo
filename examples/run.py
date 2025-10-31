@@ -8,7 +8,7 @@ from gymnasium.wrappers import AtariPreprocessing
 from stable_baselines3 import PPO
 from sb3_contrib import FRPPO
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack, VecMonitor
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack, VecMonitor, VecVideoRecorder
 from stable_baselines3.common.torch_layers import NatureCNN
 from stable_baselines3.common.env_util import make_atari_env
 
@@ -160,9 +160,12 @@ def train(config: dict):
 
 def vizualize(config: dict):
     print("Starting visualization...")
-    
+    MAX_STEPS = 10_000
+
+
     learning_algo = config['train']['algo']
     env_name = config['env_name']
+    env_is_atari = config.get('env_is_atari', True)
     n_stack = config['n_stack']
     video_folder = config['visualize']['video_folder']
     log_dir = config['logging']['log_dir']
@@ -170,39 +173,38 @@ def vizualize(config: dict):
     deterministic_actions = config['visualize']['deterministic']
     model_path = os.path.join(log_dir, f"{name_prefix}.zip")
     
-
     os.makedirs(video_folder, exist_ok=True)
 
-
-
-    # --- Helper function to create the visualization env ---
-    def make_viz_env():
-        """Creates and wraps the environment for visualization."""
-        env_is_atari = n_opt_epochs = config.get('env_is_atari', True)
-        if env_is_atari:
-            print("Atari environment detected. Using Atari-specific wrappers for visualization.")
-            # Add frameskip=1 to disable internal frame skipping for Atari
-            env = gym.make(env_name, render_mode="rgb_array", frameskip=1)
-            # 1. Wrap for video *first* to capture the full-resolution render
-            env = gym.wrappers.RecordVideo(env, video_folder=video_folder, episode_trigger=lambda e: e == 0)
-            # Apply Atari preprocessing
-            # *** terminal_on_life_loss=True ***
-            # This is the key fix: it makes the env send `done=True` after one life is lost.
-            # grayscale_newaxis=True adds channel dim for CnnPolicy compatibility
-            env = AtariPreprocessing(env, terminal_on_life_loss=True, grayscale_newaxis=True)
-        else:
-            print("Default environment detected.")
-            # Non-Atari env
-            env = gym.make(env_name, render_mode="rgb_array")
-            env = gym.wrappers.RecordVideo(env, video_folder=video_folder, episode_trigger=lambda e: e == 0)
-
+    if env_is_atari:
+        print("Atari environment detected. Using Atari-specific wrappers for visualization.")
+        env = make_atari_env(
+            env_id=env_name,
+            n_envs=1,
+            seed=1,
+            wrapper_kwargs={
+                "noop_max": 30,
+                "frame_skip": 4,
+                "screen_size": 84,
+                "terminal_on_life_loss": True,
+                "clip_reward": True,
+                "action_repeat_probability": 0.0,
+            },
+            vec_env_cls=DummyVecEnv,
+        )
+    else:
+        print("Default environment detected.")
+        # Non-Atari env
+        env = gym.make(env_name, render_mode="rgb_array")
         
-        return env
-    
-    # Wrap for SB3 and FrameStack (must match training setup)
-    # Pass the *function* to DummyVecEnv, not an already-created object
-    vec_env = DummyVecEnv([make_viz_env])
-    vec_env = VecFrameStack(vec_env, n_stack=n_stack)
+    env = VecFrameStack(env, n_stack=n_stack)
+
+    env = VecVideoRecorder(
+                env,
+                video_folder,
+                record_video_trigger=lambda x: x == 0,  # record first episode
+                video_length=MAX_STEPS,
+                name_prefix=f"{learning_algo}",
+            )
 
     # Load the trained model
     if not os.path.exists(model_path):
@@ -211,28 +213,28 @@ def vizualize(config: dict):
         
     model = None
     if learning_algo == "FRPPO":
-        model = FRPPO.load(model_path, env=vec_env)
+        model = FRPPO.load(model_path, env=env)
     elif learning_algo == "PPO":
-        model = PPO.load(model_path, env=vec_env)
+        model = PPO.load(model_path, env=env)
     else: 
         print(f"Learning algorithm {learning_algo} may be in SB3 but not it's not been setup here.")
         return
 
     print(f"Model loaded from {model_path}.")
 
-    model.set_env(vec_env)
+    model.set_env(env)
 
     # Run one episode
-    obs = vec_env.reset()
+    obs = env.reset()
     done = False
     rewsum = 0
     step = 0
-    MAX_STEPS = 100_000
+    
     while not done:
         step += 1
         # Use deterministic actions for evaluation
         action, _ = model.predict(obs, deterministic=deterministic_actions)
-        obs, rew, done, info = vec_env.step(action)
+        obs, rew, done, info = env.step(action)
         done = done[0] # we only have one envirnoment
         rewsum += rew[0]
         if (step+1) % 100 == 0:
@@ -241,7 +243,7 @@ def vizualize(config: dict):
             break
 
     # The video is saved automatically when the environment is closed
-    vec_env.close()
+    env.close()
     print(f"Visualization complete. Video saved in '{video_folder}' folder. Total steps is {step}. Total reward is {rewsum}.")
 
     # --- ADD THIS LOGIC ---
