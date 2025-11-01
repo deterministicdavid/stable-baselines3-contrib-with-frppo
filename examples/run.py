@@ -178,6 +178,7 @@ def vizualize(config: dict):
     log_dir = config['logging']['log_dir']
     name_prefix = config['logging']['name_prefix']
     deterministic_actions = config['visualize']['deterministic']
+    seed = config.get('visualize', {}).get('seed', None)
     model_path = os.path.join(log_dir, f"{name_prefix}.zip")
     
     os.makedirs(video_folder, exist_ok=True)
@@ -187,7 +188,7 @@ def vizualize(config: dict):
         env = make_atari_env(
             env_id=env_name,
             n_envs=1,
-            seed=1,
+            seed=seed,
             wrapper_kwargs={
                 "noop_max": 30,
                 "frame_skip": 4,
