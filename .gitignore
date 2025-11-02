@@ -28,8 +28,9 @@ keys/
 # Personal vs code configs
 .vscode
 
-# Videos
+# Videos and configs
 videos*/
+configs/
 
 *.sublime-project
 *.sublime-workspace
@@ -53,3 +54,5 @@ src
 *.zip
 
 MUJOCO_LOG.TXT
+scp_tesnorboard_files.sh
+scp_tesnorboard_files.sh~
