@@ -1,5 +1,8 @@
 import os
+import multiprocessing as mp
 import argparse
+import copy 
+
 import gymnasium as gym
 import ale_py
 import numpy as np
@@ -19,7 +22,7 @@ import torch
 import random
 import yaml
 
-from run_utils import OverwriteCheckpointCallback, select_free_gpu_or_fallback, post_process_video, log_hyper_parameters
+from run_utils import OverwriteCheckpointCallback, select_free_gpu_or_fallback, get_free_cuda_gpus, post_process_video, log_hyper_parameters
 from own_policy import CustomActorCriticCnnPolicy
 
 
@@ -34,9 +37,8 @@ def make_env_default(env_name: str, seed: int):
     return _init
 
 
-def train(config: dict):
-    selected_device = select_free_gpu_or_fallback()
-
+def train(config: dict, assigned_device: torch.device, seed: int):
+    
     learning_algo = config["train"]["algo"]
     env_name = config["env_name"]
     env_is_atari = n_opt_epochs = config.get("env_is_atari", True)
@@ -62,7 +64,7 @@ def train(config: dict):
         env = make_atari_env(
             env_id=env_name,
             n_envs=num_envs,
-            seed=1,
+            seed=seed,
             wrapper_kwargs={
                 "noop_max": 30,
                 "frame_skip": 4,
@@ -112,7 +114,7 @@ def train(config: dict):
             fr_penalty_scale_by_adv=fr_penalty_scale_by_adv,
             ent_coef=ent_coef,
             tensorboard_log=log_dir,
-            device=selected_device,
+            device=assigned_device,
             policy_kwargs={
                 "ortho_init": True,
                 "features_extractor_class": NatureCNN,
@@ -134,7 +136,7 @@ def train(config: dict):
             ent_coef=ent_coef,
             clip_range=clip_epsilon,
             tensorboard_log=log_dir,
-            device=selected_device,
+            device=assigned_device,
             policy_kwargs={
                 "ortho_init": True,
                 "features_extractor_class": NatureCNN,
@@ -260,15 +262,23 @@ def vizualize(config: dict):
 
 
 if __name__ == "__main__":
-    # to fix debugging on MacOS
-    # multiprocessing.set_start_method("spawn")
+    try:
+        mp.set_start_method("spawn", force=True)
+    except RuntimeError:
+        pass
 
     # --- Add command line argument parsing ---
     parser = argparse.ArgumentParser(description="Train or visualize a FRPPO agent for CarRacing-v3.")
     parser.add_argument("--train", action="store_true", help="Run the training process.")
     parser.add_argument("--visualise", action="store_true", help="Run the visualization process.")
-    parser.add_argument("--numenvs", type=int, default=6, help="Number of parallel environments to use for training.")
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to the configuration YAML file.")
+    parser.add_argument(
+        "--parallel_runs",
+        type=int,
+        default=1,
+        help="Maximum number of parallel training runs. Will be limited by the number of free GPUs.",
+    )
+
     args = parser.parse_args()
 
     config_path = args.config
@@ -285,8 +295,38 @@ if __name__ == "__main__":
         parser.print_help()
     else:
         if args.train:
-            print(f"--- Running Training --- up to a total of {config['train']['total_timesteps']}")
-            train(config=config)
+            print(f"--- Preparing for up to {args.parallel_runs} parallel training run(s) ---")
+            remaining_parallel_runs = args.parallel_runs
+            seed = 0
+            while remaining_parallel_runs > 0:
+                gpus_to_use = get_free_cuda_gpus(max_count=1024) # deliberately big number
+                num_to_run = min(remaining_parallel_runs, len(gpus_to_use)) 
+                print(f"Found {len(gpus_to_use)} free GPUs. Launching {num_to_run} out of remaining {remaining_parallel_runs} run(s) on up to {len(gpus_to_use)} GPUs.")
+                processes = []
+                for device_idx in range(0,num_to_run):
+                    device = gpus_to_use[device_idx
+                                         ]
+                    # copy and overwrite config
+                    run_config = copy.deepcopy(config)
+                    original_run_id = run_config['train']['run_id']
+                    original_prefix = run_config['logging']['name_prefix']
+                    run_config['train']['run_id'] = f"{original_run_id}_{seed}_gpu_{device.type}_{device.index}"
+                    run_config['logging']['name_prefix'] = f"{original_prefix}_{seed}_gpu_{device.index}" # this is where the train model gets saved
+                    
+                    # 4. Create and start the process
+                    p = mp.Process(target=train, args=(run_config, device, seed))
+                    processes.append(p)
+                    p.start()
+                    seed += 1 
+
+                # 5. Wait for all processes to finish
+                for p in processes:
+                    p.join()
+
+                remaining_parallel_runs -= len(gpus_to_use)
+            
+            
+            
         if args.visualise:
             print("--- Running Visualization ---")
             vizualize(config=config)

@@ -41,29 +41,40 @@ class OverwriteCheckpointCallback(BaseCallback):
         return True
 
 
-def get_free_cuda_gpus():
+def get_free_cuda_gpus(max_count: int):
     """
-    Selects MPS on Arm Macs, on CUDA systems the GPU with the most free memory.
-    Returns the device as a torch.device object.
+    Returns a list of torch devices for gpus with free memory
     """
+    gpus_with_free_mem = []
     if not torch.cuda.is_available():
-        return []
+        if torch.backends.mps.is_available():
+            for _ in range(0,max_count):
+                device = torch.device("mps")
+                gpus_with_free_mem.append(device)
+        else:
+            for _ in range(0,max_count):
+                device = torch.device("cpu")
+                gpus_with_free_mem.append(device)
+        return gpus_with_free_mem
 
     # Initialize NVML
     pynvml.nvmlInit()
-
     device_count = torch.cuda.device_count()
     gpu_indices = list(range(device_count))
-    # random.shuffle(gpu_indices)  # Randomize the order of GPU checks
-
-    gpus_with_free_mem = []
     for i in gpu_indices:
         handle = pynvml.nvmlDeviceGetHandleByIndex(i)
         meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
 
         used_mem = int(meminfo.used)
-        if used_mem == 0:
-            gpus_with_free_mem.append(i)
+        # a bit of heuristic but will pretend that
+        # any gpu that's using less than 0.5 GiB is
+        # free
+        half_gigabyte = int((1024 ** 3) / 2)
+        if used_mem < half_gigabyte:
+            device = torch.device(f"cuda:{i}")
+            gpus_with_free_mem.append(device)
+        if len(gpus_with_free_mem) >= max_count:
+            break
 
     return gpus_with_free_mem
 
