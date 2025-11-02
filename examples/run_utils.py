@@ -17,6 +17,7 @@ class OverwriteCheckpointCallback(BaseCallback):
     :param save_path: Path to the folder where the model will be saved.
     :param name_prefix: The name of the file to save the model to.
     """
+
     def __init__(self, save_freq: int, save_path: str, name_prefix: str = "latest_model", verbose: int = 0):
         super().__init__(verbose)
         self.save_freq = save_freq
@@ -32,12 +33,39 @@ class OverwriteCheckpointCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         # self.num_timesteps is the total number of steps taken in the environment
-        if self.num_timesteps > (self.num_saves+1) * self.save_freq:
+        if self.num_timesteps > (self.num_saves + 1) * self.save_freq:
             self.num_saves += 1
             self.model.save(self.save_file)
             if self.verbose > 0:
                 print(f"Saving latest model to {self.save_file}")
         return True
+
+
+def get_free_cuda_gpus():
+    """
+    Selects MPS on Arm Macs, on CUDA systems the GPU with the most free memory.
+    Returns the device as a torch.device object.
+    """
+    if not torch.cuda.is_available():
+        return []
+
+    # Initialize NVML
+    pynvml.nvmlInit()
+
+    device_count = torch.cuda.device_count()
+    gpu_indices = list(range(device_count))
+    # random.shuffle(gpu_indices)  # Randomize the order of GPU checks
+
+    gpus_with_free_mem = []
+    for i in gpu_indices:
+        handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+        meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
+
+        used_mem = int(meminfo.used)
+        if used_mem == 0:
+            gpus_with_free_mem.append(i)
+
+    return gpus_with_free_mem
 
 
 def select_free_gpu_or_fallback():
@@ -69,9 +97,10 @@ def select_free_gpu_or_fallback():
 
         if best_gpu is not None and torch.cuda.is_available():
             device = torch.device(f"cuda:{best_gpu}")
-        
+
     print(f"Selected device: {device}")
     return device
+
 
 def post_process_video(input_path: str, output_path: str, scale_factor: int = 4):
     """
@@ -80,25 +109,25 @@ def post_process_video(input_path: str, output_path: str, scale_factor: int = 4)
     """
     try:
         clip = VideoFileClip(input_path)
-        
+
         # Scale the clip
         # interp="nearest" is crucial for the pixel-art look
         scaled_clip = clip.resized(width=clip.w * scale_factor)
-        
+
         # Write the new video file
         scaled_clip.write_videofile(output_path, logger=None)
-        
+
         clip.close()
         scaled_clip.close()
         print(f"Scaled video saved to {output_path}")
-        
+
     except Exception as e:
         print(f"\nError during video post-processing: {e}")
         print("Please ensure 'moviepy' is installed (`pip install moviepy`)")
         print("And that 'ffmpeg' is available on your system.")
 
 
-def flatten_dict(d, parent_key='', sep='.'):
+def flatten_dict(d, parent_key="", sep="."):
     """
     Flattens a nested dictionary, joining keys with a separator.
     e.g., {'train': {'algo': 'PPO'}} -> {'train.algo': 'PPO'}
@@ -114,14 +143,13 @@ def flatten_dict(d, parent_key='', sep='.'):
 
 
 def log_hyper_parameters(logger, config):
-    
+
     # Flatten the config
     flat_config = flatten_dict(config)
-    
+
     # Filter for simple types and convert to string for add_hparams
     for k, v in flat_config.items():
         logger.record(f"hyperparameters/{k}", v)
-    
+
     logger.dump(step=0)
     print("Logged hyperparameters to TensorBoard HParams tab.")
-    
