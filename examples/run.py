@@ -213,7 +213,7 @@ def train(config: dict, assigned_device: torch.device, seed: int):
     env.close()
 
 
-def vizualize(config: dict):
+def vizualize(config: dict, name_override=None):
     print("Starting visualization...")
     MAX_STEPS = 10_000
 
@@ -223,9 +223,12 @@ def vizualize(config: dict):
     n_stack = config["n_stack"]
     video_folder = config["visualize"]["video_folder"]
     log_dir = config["logging"]["log_dir"]
-    name_prefix = config["logging"]["name_prefix"]
+    if name_override=="":
+        name_prefix = config["logging"]["name_prefix"]
+    else:
+        name_prefix = name_override
     deterministic_actions = config["visualize"]["deterministic"]
-    seed = config.get("visualize", {}).get("seed", None)
+    seed = None # random visualisations
     model_path = os.path.join(log_dir, f"{name_prefix}.zip")
 
     os.makedirs(video_folder, exist_ok=True)
@@ -301,17 +304,19 @@ def vizualize(config: dict):
     env.close()
     print(f"Visualization complete. Video saved in '{video_folder}' folder. Total steps is {step}. Total reward is {rewsum}.")
 
-    # Find the most recently created video file in the folder
-    list_of_files = glob.glob(os.path.join(video_folder, "*.mp4"))
-    if not list_of_files:
-        print("Error: No video file found to post-process.")
-        return
+    # TODO: hide this behind a flag
+    if False: 
+        # Find the most recently created video file in the folder
+        list_of_files = glob.glob(os.path.join(video_folder, "*.mp4"))
+        if not list_of_files:
+            print("Error: No video file found to post-process.")
+            return
 
-    latest_file = max(list_of_files, key=os.path.getctime)
-    output_file = os.path.join(video_folder, f"scaled_{os.path.basename(latest_file)}")
+        latest_file = max(list_of_files, key=os.path.getctime)
+        output_file = os.path.join(video_folder, f"scaled_{os.path.basename(latest_file)}")
 
-    # Scale the video
-    post_process_video(latest_file, output_file, scale_factor=4)
+        # Scale the video
+        post_process_video(latest_file, output_file, scale_factor=4)
 
 
 if __name__ == "__main__":
@@ -331,8 +336,16 @@ if __name__ == "__main__":
         default=1,
         help="Maximum number of parallel training runs. Will be limited by the number of free GPUs.",
     )
+    parser.add_argument(
+        "--vis_model_name",
+        type=str,
+        default="",
+        help="Model prefix name (without the .zip, without the name of the log directory from config)",
+    )
 
+    
     args = parser.parse_args()
+    
 
     config_path = args.config
     if not os.path.exists(config_path):
@@ -385,4 +398,4 @@ if __name__ == "__main__":
 
         if args.visualise:
             print("--- Running Visualization ---")
-            vizualize(config=config)
+            vizualize(config=config, name_override=args.vis_model_name)
