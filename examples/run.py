@@ -88,7 +88,6 @@ def train(config: dict, assigned_device: torch.device, seed: int):
     batch_size = config["train"]["batch_size"]
     total_timesteps = config["train"]["total_timesteps"]
     ent_coef = config["train"]["ent_coef"]
-    
 
     policy = None
     policy_kwargs = {}
@@ -131,13 +130,18 @@ def train(config: dict, assigned_device: torch.device, seed: int):
             "share_features_extractor": False,
         }
 
-        # env_fns = [make_env_mujoco(config=config, seed=(seed + i)) for i in range(num_envs)]
-        # env = SubprocVecEnv(env_fns)
-        # env = VecMonitor(env)
-        env = make_vec_env(env_name, n_envs=num_envs)
-        env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
-        if n_stack>0:
-            print(f"Mujoco doesn't do \"frame\" stacking.")
+        def custom_wrappers(env: gym.Env) -> gym.Env:
+            # env = gym.wrappers.ClipAction(env) # this messes up the action space
+            env = gym.wrappers.NormalizeObservation(env)
+            env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10), env.observation_space)
+            env = gym.wrappers.NormalizeReward(env)
+            env = gym.wrappers.TransformReward(env, lambda r: np.clip(r, -10, 10))
+            return env
+
+        env = make_vec_env(env_name, n_envs=num_envs, wrapper_class=custom_wrappers)
+        # env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
+        if n_stack > 0:
+            print(f'Mujoco doesn\'t do "frame" stacking.')
     else:
         policy = "CnnPolicy"  # TODO: this will need more work as it won't work for both car racing and the classic stuff
         env_fns = [make_env_default(env_name, seed=i) for i in range(num_envs)]
@@ -160,6 +164,10 @@ def train(config: dict, assigned_device: torch.device, seed: int):
 
     default_n_opt_epochs = 4
     n_opt_epochs = config.get("train", {}).get("n_opt_epochs", default_n_opt_epochs)
+
+    print("Action space:", env.action_space)
+    print("Low:", env.action_space.low)
+    print("High:", env.action_space.high)
 
     if learning_algo == "FRPPO":
         fr_tau_penalty = config["train"]["fr_tau_penalty"]
@@ -223,12 +231,12 @@ def vizualize(config: dict, name_override=None):
     n_stack = config["n_stack"]
     video_folder = config["visualize"]["video_folder"]
     log_dir = config["logging"]["log_dir"]
-    if name_override=="":
+    if name_override == "":
         name_prefix = config["logging"]["name_prefix"]
     else:
         name_prefix = name_override
     deterministic_actions = config["visualize"]["deterministic"]
-    seed = None # random visualisations
+    seed = None  # random visualisations
     model_path = os.path.join(log_dir, f"{name_prefix}.zip")
 
     os.makedirs(video_folder, exist_ok=True)
@@ -305,7 +313,7 @@ def vizualize(config: dict, name_override=None):
     print(f"Visualization complete. Video saved in '{video_folder}' folder. Total steps is {step}. Total reward is {rewsum}.")
 
     # TODO: hide this behind a flag
-    if False: 
+    if False:
         # Find the most recently created video file in the folder
         list_of_files = glob.glob(os.path.join(video_folder, "*.mp4"))
         if not list_of_files:
@@ -343,9 +351,7 @@ if __name__ == "__main__":
         help="Model prefix name (without the .zip, without the name of the log directory from config)",
     )
 
-    
     args = parser.parse_args()
-    
 
     config_path = args.config
     if not os.path.exists(config_path):
