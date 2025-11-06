@@ -75,8 +75,8 @@ def train(config: dict, assigned_device: torch.device, seed: int):
     learning_algo = config["train"]["algo"]
 
     env_name = config["env_name"]
-    env_is_atari = n_opt_epochs = config.get("env_is_atari", True)
-    env_is_mujoco = n_opt_epochs = config.get("env_is_mujoco", False)
+    env_is_atari = config.get("env_is_atari", True)
+    env_is_mujoco = config.get("env_is_mujoco", False)
     assert not (env_is_atari and (not env_is_mujoco))
 
     n_stack = config["n_stack"]
@@ -88,6 +88,7 @@ def train(config: dict, assigned_device: torch.device, seed: int):
     batch_size = config["train"]["batch_size"]
     total_timesteps = config["train"]["total_timesteps"]
     ent_coef = config["train"]["ent_coef"]
+    
 
     policy = None
     policy_kwargs = {}
@@ -124,7 +125,6 @@ def train(config: dict, assigned_device: torch.device, seed: int):
         env = VecFrameStack(env, n_stack=n_stack)
 
     elif env_is_mujoco:
-        never_mps = True
         policy = "MlpPolicy"  # TODO: check whether we need to set more options to track "The 37 implementation details"
         policy_kwargs = {
             "ortho_init": True,
@@ -136,6 +136,8 @@ def train(config: dict, assigned_device: torch.device, seed: int):
         # env = VecMonitor(env)
         env = make_vec_env(env_name, n_envs=num_envs)
         env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
+        if n_stack>0:
+            print(f"Mujoco doesn't do \"frame\" stacking.")
     else:
         policy = "CnnPolicy"  # TODO: this will need more work as it won't work for both car racing and the classic stuff
         env_fns = [make_env_default(env_name, seed=i) for i in range(num_envs)]
@@ -348,9 +350,10 @@ if __name__ == "__main__":
         if args.train:
             print(f"--- Preparing for up to {args.parallel_runs} parallel training run(s) ---")
             remaining_parallel_runs = args.parallel_runs
-            seed = 0
+            seed = config["train"].get("random_seed", None)
+            force_cpu = config["train"].get("force_cpu", False)
             while remaining_parallel_runs > 0:
-                gpus_to_use = get_free_cuda_gpus(max_count=args.parallel_runs, never_mps=True)
+                gpus_to_use = get_free_cuda_gpus(max_count=args.parallel_runs, force_cpu=force_cpu)
                 num_to_run = min(remaining_parallel_runs, len(gpus_to_use))
                 print(
                     f"Found {len(gpus_to_use)} free GPUs. Launching {num_to_run} out of remaining {remaining_parallel_runs} run(s) on up to {len(gpus_to_use)} GPUs."
@@ -362,16 +365,17 @@ if __name__ == "__main__":
                     run_config = copy.deepcopy(config)
                     original_run_id = run_config["train"]["run_id"]
                     original_prefix = run_config["logging"]["name_prefix"]
-                    run_config["train"]["run_id"] = f"{original_run_id}_{seed}_gpu_{device.type}_{device.index}"
+                    run_config["train"]["run_id"] = f"{original_run_id}_{device_idx}_gpu_{device.type}_{device.index}"
                     run_config["logging"][
                         "name_prefix"
-                    ] = f"{original_prefix}_{seed}_gpu_{device.index}"  # this is where the train model gets saved
+                    ] = f"{original_prefix}_{device_idx}_gpu_{device.index}"  # this is where the train model gets saved
 
                     # 4. Create and start the process
                     p = mp.Process(target=train, args=(run_config, device, seed))
                     processes.append(p)
                     p.start()
-                    seed += 1
+                    if seed is not None:
+                        seed += 1
 
                 # 5. Wait for all processes to finish
                 for p in processes:

@@ -41,13 +41,13 @@ class OverwriteCheckpointCallback(BaseCallback):
         return True
 
 
-def get_free_cuda_gpus(max_count: int, never_mps=False):
+def get_free_cuda_gpus(max_count: int, force_cpu=False):
     """
     Returns a list of torch devices for gpus with free memory
     """
     gpus_with_free_mem = []
     if not torch.cuda.is_available():
-        if torch.backends.mps.is_available() and not never_mps:
+        if torch.backends.mps.is_available() and not force_cpu:
             for _ in range(0, max_count):
                 device = torch.device("mps")
                 gpus_with_free_mem.append(device)
@@ -56,6 +56,11 @@ def get_free_cuda_gpus(max_count: int, never_mps=False):
                 device = torch.device("cpu")
                 gpus_with_free_mem.append(device)
         return gpus_with_free_mem
+    elif force_cpu:
+        for _ in range(0, max_count):
+            device = torch.device("cpu")
+            gpus_with_free_mem.append(device)
+        return gpus_with_free_mem        
 
     # Initialize NVML
     pynvml.nvmlInit()
