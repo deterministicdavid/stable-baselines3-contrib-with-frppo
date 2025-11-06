@@ -1,20 +1,27 @@
 import os
 import multiprocessing as mp
 import argparse
-import copy 
+import copy
 
 import gymnasium as gym
 import ale_py
 import numpy as np
 
-from gymnasium.wrappers import AtariPreprocessing
+from gymnasium.wrappers import AtariPreprocessing, TransformObservation
 from stable_baselines3 import PPO
 from sb3_contrib import FRPPO
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack, VecMonitor, VecVideoRecorder
+from stable_baselines3.common.vec_env import (
+    DummyVecEnv,
+    SubprocVecEnv,
+    VecFrameStack,
+    VecMonitor,
+    VecVideoRecorder,
+    VecNormalize,
+)
 from stable_baselines3.common.torch_layers import NatureCNN
-from stable_baselines3.common.env_util import make_atari_env
+from stable_baselines3.common.env_util import make_atari_env, make_vec_env
 
 
 import glob
@@ -22,7 +29,13 @@ import torch
 import random
 import yaml
 
-from run_utils import OverwriteCheckpointCallback, select_free_gpu_or_fallback, get_free_cuda_gpus, post_process_video, log_hyper_parameters
+from run_utils import (
+    OverwriteCheckpointCallback,
+    select_free_gpu_or_fallback,
+    get_free_cuda_gpus,
+    post_process_video,
+    log_hyper_parameters,
+)
 from own_policy import CustomActorCriticCnnPolicy
 
 
@@ -37,11 +50,35 @@ def make_env_default(env_name: str, seed: int):
     return _init
 
 
+def make_env_mujoco(config: dict, seed: int):
+    def _init():
+        env = gym.make(config["env_name"])
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+
+        env = gym.wrappers.ClipAction(env)
+        env = gym.wrappers.NormalizeObservation(env)
+        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10.0, 10.0), None)
+        env = gym.wrappers.NormalizeReward(env)
+        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10.0, 10.0))
+
+        # env.seed(seed)
+        env.reset(seed=seed)
+        env.action_space.seed(seed)
+        env.observation_space.seed(seed)
+        return env
+
+    return _init
+
+
 def train(config: dict, assigned_device: torch.device, seed: int):
-    
+
     learning_algo = config["train"]["algo"]
+
     env_name = config["env_name"]
     env_is_atari = n_opt_epochs = config.get("env_is_atari", True)
+    env_is_mujoco = n_opt_epochs = config.get("env_is_mujoco", False)
+    assert not (env_is_atari and (not env_is_mujoco))
+
     n_stack = config["n_stack"]
     num_envs = config["train"]["n_envs"]
     log_dir = config["logging"]["log_dir"]
@@ -52,15 +89,23 @@ def train(config: dict, assigned_device: torch.device, seed: int):
     total_timesteps = config["train"]["total_timesteps"]
     ent_coef = config["train"]["ent_coef"]
 
-    # Note that using CnnPolicy makes SB3 normalize images to [0,1],
-    # which is #9 of "The 37 implementation details of Proximal Policy Optimization"
-    policy = "CnnPolicy"
-    if config["train"]["policy"] == "own":
-        policy = CustomActorCriticCnnPolicy  # this will also normalize to [0,1]
-
-    # if env_name.startswith("ALE/"):
+    policy = None
+    policy_kwargs = {}
+    never_mps = False
     if env_is_atari:
-        # env_fns = [make_env_atari(env_name=env_name, seed=i) for i in range(num_envs)]
+        # Note that using CnnPolicy makes SB3 normalize images to [0,1],
+        # which is #9 of "The 37 implementation details of Proximal Policy Optimization"
+        policy = "CnnPolicy"
+        policy_kwargs = {
+            "ortho_init": True,
+            "features_extractor_class": NatureCNN,
+            "share_features_extractor": True,
+            "normalize_images": True,
+        }
+
+        if config["train"]["policy"] == "own":
+            policy = CustomActorCriticCnnPolicy  # this will also normalize to [0,1]
+
         env = make_atari_env(
             env_id=env_name,
             n_envs=num_envs,
@@ -75,14 +120,28 @@ def train(config: dict, assigned_device: torch.device, seed: int):
             },
             vec_env_cls=DummyVecEnv,
         )
+        # Using frame stacking with n_stack=4 is #7 of "The 37 implementation details of Proximal Policy Optimization"
+        env = VecFrameStack(env, n_stack=n_stack)
 
+    elif env_is_mujoco:
+        never_mps = True
+        policy = "MlpPolicy"  # TODO: check whether we need to set more options to track "The 37 implementation details"
+        policy_kwargs = {
+            "ortho_init": True,
+            "share_features_extractor": False,
+        }
+
+        # env_fns = [make_env_mujoco(config=config, seed=(seed + i)) for i in range(num_envs)]
+        # env = SubprocVecEnv(env_fns)
+        # env = VecMonitor(env)
+        env = make_vec_env(env_name, n_envs=num_envs)
+        env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
     else:
+        policy = "CnnPolicy"  # TODO: this will need more work as it won't work for both car racing and the classic stuff
         env_fns = [make_env_default(env_name, seed=i) for i in range(num_envs)]
         env = SubprocVecEnv(env_fns)
         env = VecMonitor(env)
-
-    # Using frame stacking with n_stack=4 is #7 of "The 37 implementation details of Proximal Policy Optimization"
-    env = VecFrameStack(env, n_stack=n_stack)
+        env = VecFrameStack(env, n_stack=n_stack)
 
     # --- Setup what we save ---
     checkpoint_callback = OverwriteCheckpointCallback(
@@ -94,7 +153,8 @@ def train(config: dict, assigned_device: torch.device, seed: int):
     model = None
     learning_rate = 3e-4
     if config["train"]["decay_lr"]:
-        learning_rate = lambda f: f * 2.5e-4
+        lr_decay_init = float(config.get("train", {}).get("decay_lr_init", "2.5e-4"))
+        learning_rate = lambda f: f * lr_decay_init
 
     default_n_opt_epochs = 4
     n_opt_epochs = config.get("train", {}).get("n_opt_epochs", default_n_opt_epochs)
@@ -115,12 +175,7 @@ def train(config: dict, assigned_device: torch.device, seed: int):
             ent_coef=ent_coef,
             tensorboard_log=log_dir,
             device=assigned_device,
-            policy_kwargs={
-                "ortho_init": True,
-                "features_extractor_class": NatureCNN,
-                "share_features_extractor": True,
-                "normalize_images": True,
-            },
+            policy_kwargs=policy_kwargs,
         )
     elif learning_algo == "PPO":
         default_clip_epsilon = 0.2
@@ -137,12 +192,7 @@ def train(config: dict, assigned_device: torch.device, seed: int):
             clip_range=clip_epsilon,
             tensorboard_log=log_dir,
             device=assigned_device,
-            policy_kwargs={
-                "ortho_init": True,
-                "features_extractor_class": NatureCNN,
-                "share_features_extractor": True,
-                "normalize_images": True,
-            },
+            policy_kwargs=policy_kwargs,
         )
     else:
         print(f"Learning algorithm {learning_algo} may be in SB3 but not it's not been setup here.")
@@ -194,15 +244,16 @@ def vizualize(config: dict):
             },
             vec_env_cls=DummyVecEnv,
         )
+        env = VecFrameStack(env, n_stack=n_stack)
     else:
         print("Default environment detected.")
         # Non-Atari env
-        env = gym.make(env_name, render_mode="rgb_array")
+        # env = gym.make(env_name, render_mode="rgb_array")
+        env = make_vec_env(env_name, n_envs=1)
 
-    env = VecFrameStack(env, n_stack=n_stack)
     env = VecVideoRecorder(
-        env,
-        video_folder,
+        venv=env,
+        video_folder=video_folder,
         record_video_trigger=lambda x: x == 0,  # record first episode
         video_length=MAX_STEPS,
         name_prefix=f"{learning_algo}",
@@ -299,34 +350,35 @@ if __name__ == "__main__":
             remaining_parallel_runs = args.parallel_runs
             seed = 0
             while remaining_parallel_runs > 0:
-                gpus_to_use = get_free_cuda_gpus(max_count=1024) # deliberately big number
-                num_to_run = min(remaining_parallel_runs, len(gpus_to_use)) 
-                print(f"Found {len(gpus_to_use)} free GPUs. Launching {num_to_run} out of remaining {remaining_parallel_runs} run(s) on up to {len(gpus_to_use)} GPUs.")
+                gpus_to_use = get_free_cuda_gpus(max_count=args.parallel_runs, never_mps=True)
+                num_to_run = min(remaining_parallel_runs, len(gpus_to_use))
+                print(
+                    f"Found {len(gpus_to_use)} free GPUs. Launching {num_to_run} out of remaining {remaining_parallel_runs} run(s) on up to {len(gpus_to_use)} GPUs."
+                )
                 processes = []
-                for device_idx in range(0,num_to_run):
-                    device = gpus_to_use[device_idx
-                                         ]
+                for device_idx in range(0, num_to_run):
+                    device = gpus_to_use[device_idx]
                     # copy and overwrite config
                     run_config = copy.deepcopy(config)
-                    original_run_id = run_config['train']['run_id']
-                    original_prefix = run_config['logging']['name_prefix']
-                    run_config['train']['run_id'] = f"{original_run_id}_{seed}_gpu_{device.type}_{device.index}"
-                    run_config['logging']['name_prefix'] = f"{original_prefix}_{seed}_gpu_{device.index}" # this is where the train model gets saved
-                    
+                    original_run_id = run_config["train"]["run_id"]
+                    original_prefix = run_config["logging"]["name_prefix"]
+                    run_config["train"]["run_id"] = f"{original_run_id}_{seed}_gpu_{device.type}_{device.index}"
+                    run_config["logging"][
+                        "name_prefix"
+                    ] = f"{original_prefix}_{seed}_gpu_{device.index}"  # this is where the train model gets saved
+
                     # 4. Create and start the process
                     p = mp.Process(target=train, args=(run_config, device, seed))
                     processes.append(p)
                     p.start()
-                    seed += 1 
+                    seed += 1
 
                 # 5. Wait for all processes to finish
                 for p in processes:
                     p.join()
 
                 remaining_parallel_runs -= len(gpus_to_use)
-            
-            
-            
+
         if args.visualise:
             print("--- Running Visualization ---")
             vizualize(config=config)
