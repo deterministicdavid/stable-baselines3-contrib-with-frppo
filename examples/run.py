@@ -75,7 +75,7 @@ def train(config: dict, assigned_device: torch.device, seed: int):
     env_name = config["env_name"]
     env_is_atari = config.get("env_is_atari", True)
     env_is_mujoco = config.get("env_is_mujoco", False)
-    assert not (env_is_atari and (not env_is_mujoco))
+    assert not (env_is_atari and env_is_mujoco)
 
     n_stack = config["n_stack"]
     num_envs = config["train"]["n_envs"]
@@ -376,7 +376,9 @@ if __name__ == "__main__":
                     device = gpus_to_use[device_idx]
                     # copy and overwrite config
                     run_config = copy.deepcopy(config)
-                    original_run_id = run_config["train"]["run_id"]
+                    def_run_id = "0"
+                    original_run_id = config.get("train", {}).get("run_id", def_run_id)
+                    # original_run_id = run_config["train"]["run_id"]
                     original_prefix = run_config["logging"]["name_prefix"]
                     run_config["train"]["run_id"] = f"{original_run_id}_{device_idx}_gpu_{device.type}_{device.index}"
                     run_config["logging"][

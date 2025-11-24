@@ -24,6 +24,7 @@ keys/
 # Virtualenv
 /env
 /venv
+/venv_sb3
 
 # Personal vs code configs
 .vscode

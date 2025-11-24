@@ -66,6 +66,12 @@ def get_free_cuda_gpus(max_count: int, force_cpu=False):
     pynvml.nvmlInit()
     device_count = torch.cuda.device_count()
     gpu_indices = list(range(device_count))
+    if len(gpu_indices) == 1: 
+        # we have just one gpu
+        device = torch.device(f"cuda:{0}")
+        gpus_with_free_mem.append(device)
+        return gpus_with_free_mem
+    
     for i in gpu_indices:
         handle = pynvml.nvmlDeviceGetHandleByIndex(i)
         meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
