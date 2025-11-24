@@ -71,9 +71,7 @@ def make_env_mujoco(config: dict, seed: int):
 
 
 def train(config: dict, assigned_device: torch.device, seed: int):
-
     learning_algo = config["train"]["algo"]
-
     env_name = config["env_name"]
     env_is_atari = config.get("env_is_atari", True)
     env_is_mujoco = config.get("env_is_mujoco", False)
@@ -91,7 +89,7 @@ def train(config: dict, assigned_device: torch.device, seed: int):
 
     policy = None
     policy_kwargs = {}
-    never_mps = False
+
     if env_is_atari:
         # Note that using CnnPolicy makes SB3 normalize images to [0,1],
         # which is #9 of "The 37 implementation details of Proximal Policy Optimization"
@@ -164,10 +162,6 @@ def train(config: dict, assigned_device: torch.device, seed: int):
 
     default_n_opt_epochs = 4
     n_opt_epochs = config.get("train", {}).get("n_opt_epochs", default_n_opt_epochs)
-
-    print("Action space:", env.action_space)
-    print("Low:", env.action_space.low)
-    print("High:", env.action_space.high)
 
     if learning_algo == "FRPPO":
         fr_tau_penalty = config["train"]["fr_tau_penalty"]
