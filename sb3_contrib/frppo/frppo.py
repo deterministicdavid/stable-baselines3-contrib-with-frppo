@@ -1,5 +1,6 @@
 import warnings
 from typing import Any, ClassVar, Optional, TypeVar, Union
+from enum import Enum, auto
 
 import numpy as np
 import torch as th
@@ -14,6 +15,10 @@ from stable_baselines3.common.utils import FloatSchedule, explained_variance
 
 SelfFRPPO = TypeVar("SelfFRPPO", bound="FRPPO")
 
+class FRPenaltyScaleByAdv(Enum):
+    NONE = 0
+    UP_ONLY = 1
+    UP_AND_DOWN = 2
 
 class FRPPO(OnPolicyAlgorithm):
     """
@@ -164,7 +169,21 @@ class FRPPO(OnPolicyAlgorithm):
         self.batch_size = batch_size
         self.n_epochs = n_epochs
         self.fr_penalty_tau = fr_penalty_tau
-        self.fr_penalty_scale_by_adv = fr_penalty_scale_by_adv
+        if isinstance(fr_penalty_scale_by_adv, bool):
+            if fr_penalty_scale_by_adv == True:
+                self.fr_penalty_scale_by_adv = FRPenaltyScaleByAdv.UP_ONLY
+            else:
+                self.fr_penalty_scale_by_adv = FRPenaltyScaleByAdv.NONE
+        elif isinstance(fr_penalty_scale_by_adv, str):
+            if fr_penalty_scale_by_adv.lower() == "up_and_down":
+                self.fr_penalty_scale_by_adv = FRPenaltyScaleByAdv.UP_AND_DOWN
+            elif fr_penalty_scale_by_adv.lower() == "up_only":
+                self.fr_penalty_scale_by_adv = FRPenaltyScaleByAdv.UP_ONLY
+            else:
+                self.fr_penalty_scale_by_adv = FRPenaltyScaleByAdv.NONE
+        else:
+            raise ValueError(f"Don't know how to interpret {fr_penalty_scale_by_adv}.")
+
         self.clip_range_vf = clip_range_vf
         self.normalize_advantage = normalize_advantage
         self.target_kl = target_kl
@@ -227,8 +246,11 @@ class FRPPO(OnPolicyAlgorithm):
                 # FR2 distance
                 fr2 = 4.0 * th.mean(th.square(th.exp(0.5*log_prob) - th.exp(0.5*rollout_data.old_log_prob)))
                 fr2_penalty = (1.0/(2.0*fr_penalty_tau)) * fr2
-                if self.fr_penalty_scale_by_adv and max_advantage > 1.0:
+                if self.fr_penalty_scale_by_adv == FRPenaltyScaleByAdv.UP_AND_DOWN: 
                     fr2_penalty *= max_advantage
+                elif self.fr_penalty_scale_by_adv == FRPenaltyScaleByAdv.UP_ONLY:
+                    max_advantage_factor = max_advantage if max_advantage > 1 else 1.0
+                    fr2_penalty *= max_advantage_factor
 
                 adv_ratio_mean = th.mean(advantages * ratio)
                 policy_loss = -adv_ratio_mean + fr2_penalty
